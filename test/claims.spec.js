@@ -15,7 +15,7 @@ let mongo = require('mongodb')
 chai.use(chaiHttp)
 
 describe('Claims', () => {
-  var token, claim_ids, update_claim_id, updated_claim, githubtoken
+  var token, claim_ids, update_claim_id, updated_claim, githubtoken, update_github_claim_id
   var user = {
     email: "person@example.com",
     password: "testpass123"
@@ -285,6 +285,80 @@ describe('Claims', () => {
         .end((err, res) => {
           res.body.should.be.a('object')
           res.should.have.status(422)
+          done()
+        })
+    })
+
+    it('should modify proof with parsed value for github account verification claim', done => {
+      updated_claim = {
+        title: 'githubRepoOwnership',
+        desc: 'An updated description',
+        proof: 'https://github.com/user3',
+        claim_id: update_github_claim_id
+      }
+      chai.request(server)
+        .post('/updateclaim')
+        .set('Authorization', 'Bearer ' + token)
+        .send(claim)
+        .end((err, res) => {
+          res.body.should.be.a('object')
+          res.should.have.status(200)
+          res.body.claim[0].proof.should.equal('user3')
+          done()
+        })
+    })
+
+    it('should return 422 for invalid proof format for github repo conformation claim', done => {
+      let claim = {
+        title: 'githubRepoOwnership',
+        desc: 'A description',
+        proof: 'https://github.com/user3/repo',
+        claim_id: update_github_claim_id
+      }
+      chai.request(server)
+        .post('/updateclaim')
+        .set('Authorization', 'Bearer ' + token)
+        .send(claim)
+        .end((err, res) => {
+          res.should.have.status(422)
+          res.body.success.should.equal(false)
+          res.body.message.should.equal('Invalid proof format for Github account verification claim')
+          done()
+        })
+    })
+
+    it('should return 422 on attempt to change proof for github repo conformation claim on some that already existed', done => {
+      let claim = {
+        title: 'githubRepoOwnership',
+        desc: 'A description',
+        proof: 'https://github.com/user1'
+      }
+      chai.request(server)
+        .post('/updateclaim')
+        .set('Authorization', 'Bearer ' + token)
+        .send(claim)
+        .end((err, res) => {
+          res.should.have.status(422)
+          res.body.success.should.equal(false)
+          res.body.message.should.equal('You can`t have two claims for single github account verification')
+          done()
+        })
+    })
+
+    it('should treat proof of github repo conformation claim ending with "/" same as without ending "/"', done => {
+      let claim = {
+        title: 'githubRepoOwnership',
+        desc: 'A description',
+        proof: 'https://github.com/user1/'
+      }
+      chai.request(server)
+        .post('/updateclaim')
+        .set('Authorization', 'Bearer ' + token)
+        .send(claim)
+        .end((err, res) => {
+          res.should.have.status(422)
+          res.body.success.should.equal(false)
+          res.body.message.should.equal('You can`t have two claims for single github account verification')
           done()
         })
     })

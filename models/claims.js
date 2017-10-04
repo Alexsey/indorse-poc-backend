@@ -285,35 +285,79 @@ exports.updateClaims = function(req, res) {
                                 }, function(err, currclaim) {
 
                                     if (currclaim) {
-                                        var claim = {};
                                         currclaim['title'] = info['title'];
                                         currclaim['desc'] = info['desc']
-                                        currclaim['proof'] = info['proof'];
-                                        if ('visible' in info && info['visible'] != '') {
-                                            currclaim['visible'] = info['visible'];
-                                        }
-                                        if ('archive' in info && info['archive'] != '') {
-                                            currclaim['archive'] = info['archive'];
-                                        }
-                                        collection1.update({
-                                            '_id': new ObjectID(info['claim_id'])
-                                        }, currclaim, {
-                                            safe: true
-                                        }, function(err, result) {
+                                        if (currclaim['title'] == 'githubRepoOwnership') {
 
-                                            if (err) {
-                                                res.send(501, {
-                                                    success: false,
-                                                    message: config.get('Msg37')
-                                                });
+                                            if (info['proof'].match(/github.com\/\w+\/?$/)) {
+                                                currclaim['proof'] = info['proof'].match(/github.com\/(\w+)\/?$/)[1];
                                             } else {
-                                                res.send(200, {
-                                                    success: true,
-                                                    message: config.get('Msg38')
-                                                });
+                                                res.send(422, {
+                                                    success: false,
+                                                    message: 'Invalid proof format for Github account verification claim'
+                                                })
                                             }
 
-                                        })
+                                            db.collection('claims', function(err, collection1) {
+
+                                                collection1.findOne({'$and': [{'ownerid': currclaim['ownerid']}, {'proof': currclaim['proof']}]}, function (err, item) {
+                                                    if (item) {
+                                                        res.send(400, {
+                                                            success: false,
+                                                            message: 'You can`t have two claims for single github account verification'
+                                                        })
+                                                    } else {
+
+                                                        collection1.update({
+                                                            '_id': new ObjectID(info['claim_id'])
+                                                        }, currclaim, {
+                                                            safe: true
+                                                        }, function(err, result) {
+
+                                                            if (err) {
+                                                                res.send(501, {
+                                                                    success: false,
+                                                                    message: config.get('Msg37')
+                                                                });
+                                                            } else {
+                                                                res.send(200, {
+                                                                    success: true,
+                                                                    message: config.get('Msg38')
+                                                                });
+                                                            }
+
+                                                        })
+                                                    }
+                                                })
+                                            })
+                                        } else {
+                                            currclaim['proof'] = info['proof'];
+                                            if ('visible' in info && info['visible'] != '') {
+                                                currclaim['visible'] = info['visible'];
+                                            }
+                                            if ('archive' in info && info['archive'] != '') {
+                                                currclaim['archive'] = info['archive'];
+                                            }
+                                            collection1.update({
+                                                '_id': new ObjectID(info['claim_id'])
+                                            }, currclaim, {
+                                                safe: true
+                                            }, function(err, result) {
+
+                                                if (err) {
+                                                    res.send(501, {
+                                                        success: false,
+                                                        message: config.get('Msg37')
+                                                    });
+                                                } else {
+                                                    res.send(200, {
+                                                        success: true,
+                                                        message: config.get('Msg38')
+                                                    });
+                                                }
+
+                                            })
+                                        }
                                     } else {
                                         res.send(404, {
                                             success: false,
