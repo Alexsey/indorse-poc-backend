@@ -9,15 +9,27 @@ let mongo = require('mongodb')
   , DB = require('./db')
   , Mailgun = require('mailgun-js')
   , crypto = require('crypto')
+  , sandbox = Sinon.createSandbox()
+  , mailgunSendSpy = sandbox.stub().yields(null, {success: true})
+
 chai.use(chaiHttp)
 
-
 describe('Claims', () => {
-  var token, claim_id, update_claim_id, updated_claim
+  var token, claim_ids, update_claim_id, updated_claim, githubtoken
   var user = {
     email: "person@example.com",
     password: "testpass123"
   }
+
+  beforeEach('setup Sinon sandbox', () => {
+    sandbox.stub(Mailgun({ apiKey: 'foo', domain: 'bar' }).Mailgun.prototype, 'messages').returns({
+      send: mailgunSendSpy
+    })
+  })
+
+  afterEach('restore Sinon sandbox', () => {
+    sandbox.restore()
+  })
 
   before('connect to the database', (done) => {
     DB.connect(done)
@@ -74,7 +86,7 @@ describe('Claims', () => {
         .end((err, res) => {
           res.body.should.be.a('object')
           res.should.have.status(200)
-          claim_id = res.body.claim[0]._id
+          claim_id.push(res.body.claim[0]._id)
           done()
         })
     })
@@ -112,14 +124,112 @@ describe('Claims', () => {
           done()
         })
     })
+
+    it('should parse proof and send an email for github repo conformation claim', done => {
+      let claim = {
+        title: 'githubRepoOwnership',
+        desc: 'A description',
+        proof: 'https://github.com/user1'
+      }
+      chai.request(server)
+        .post('/claims')
+        .set('Authorization', 'Bearer ' + token)
+        .send(claim)
+        .end((err, res) => {
+          res.should.have.status(200)
+          res.body.should.include({proof: 'user1'})
+          res.body.should.have.property('githubtoken')
+          claim_id.push(res.body.claim[0]._id)
+          mailgunSendSpy.calledOnce.should.be.equal(true)
+          done()
+        })
+    })
+
+    it('should return 422 for invalid proof format for github repo conformation claim', done => {
+      let claim = {
+        title: 'githubRepoOwnership',
+        desc: 'A description',
+        proof: 'https://github.com/user1/repo'
+      }
+      chai.request(server)
+        .post('/claims')
+        .set('Authorization', 'Bearer ' + token)
+        .send(claim)
+        .end((err, res) => {
+          res.should.have.status(422)
+          res.body.success.should.equal(false)
+          res.body.message.should.equal('Invalid proof format for Github account verification claim')
+          mailgunSendSpy.calledOnce.should.be.equal(false)
+          done()
+        })
+    })
+
+    it('should return 422 for github repo conformation claim with same proof as already existed', done => {
+      let claim = {
+        title: 'githubRepoOwnership',
+        desc: 'A description',
+        proof: 'https://github.com/user1'
+      }
+      chai.request(server)
+        .post('/claims')
+        .set('Authorization', 'Bearer ' + token)
+        .send(claim)
+        .end((err, res) => {
+          res.should.have.status(422)
+          res.body.success.should.equal(false)
+          res.body.message.should.equal('There is already a claim request for this proof')
+          mailgunSendSpy.calledOnce.should.be.equal(false)
+          done()
+        })
+    })
+
+    it('should treat proof of github repo conformation claim ending with "/" same as without ending "/"', done => {
+      let claim = {
+        title: 'githubRepoOwnership',
+        desc: 'A description',
+        proof: 'https://github.com/user1/'
+      }
+      chai.request(server)
+        .post('/claims')
+        .set('Authorization', 'Bearer ' + token)
+        .send(claim)
+        .end((err, res) => {
+          res.should.have.status(422)
+          res.body.success.should.equal(false)
+          res.body.message.should.equal('There is already a claim request for this proof')
+          mailgunSendSpy.calledOnce.should.be.equal(false)
+          done()
+        })
+    })
+
+    it('should successfully add another github repo conformation claim for a new github account', done => {
+      let claim = {
+        title: 'githubRepoOwnership',
+        desc: 'A description',
+        proof: 'https://github.com/user2'
+      }
+      chai.request(server)
+        .post('/claims')
+        .set('Authorization', 'Bearer ' + token)
+        .send(claim)
+        .end((err, res) => {
+          res.should.have.status(200)
+          res.body.should.include({proof: 'user1'})
+          res.body.should.have.nested.property('githubtoken')
+          githubtoken = res.body.githubtoken
+          update_github_claim_id = res.body.claim[0]._id
+          claim_id.push(res.body.claim[0]._id)
+          mailgunSendSpy.calledOnce.should.be.equal(true)
+          done()
+        })
+    })
   })
 
   after('posting claims, remove it', (done) => {
     claims = DB.getDB().collection('claims')
-    claims.remove({_id: mongo.ObjectID(claim_id)},
-      (err, res) => {
-        done()
-      })
+    Promise.all(claim_ids.map(claim_id =>
+      claims.remove({_id: mongo.ObjectID(claim_id)})
+    )).then(done)
   })
 
   before('updating claim, create a new one', (done) => {

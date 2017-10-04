@@ -129,38 +129,109 @@ exports.claim = function(req, res) {
                         } else {
                             var claim = {};
                             claim['title'] = info['title'];
-                            claim['desc'] = info['desc']
-                            claim['proof'] = info['proof']
+                            claim['desc'] = info['desc'];
                             claim['state'] = 'new';
-                            claim['visible'] = true
+                            claim['visible'] = true;
                             claim['ownerid'] = item['_id'].toString();
+                            if (claim['title'] == 'githubRepoOwnership') {
+                                if (info['proof'].match(/github.com\/\w+\/?$/)) {
+                                    claim['proof'] = info['proof'].match(/github.com\/(\w+)\/?$/)[1];
+                                    claim['githubtoken'] = randtoken.uid(32);
+                                } else {
+                                    res.send(422, {
+                                        success: false,
+                                        message: 'Invalid proof format for Github account verification claim'
+                                    })
+                                }
+                            } else {
+                                claim['proof'] = info['proof'];
+                            }
                             db.collection('claims', function(err, collection1) {
-                                collection1.insert(claim, {
-                                    safe: true
-                                }, function(err, result) {
-                                    if (err) {
-                                        res.send(501, {
-                                            success: false,
-                                            message: 'Something went wrong'
-                                        });
-                                    } else {
-                                        if ('result' in result && 'ok' in result['result'] && result['result']['ok'] == 1) {
-                                            create_votinground(result['ops'][0]['_id'].toString(),claim['ownerid']);
-                                            res.send(200, {
-                                                success: true,
-                                                claim: result['ops'],
-                                                message: config.get('Msg34')
-                                            });
+                                if (claim['title'] == 'githubRepoOwnership') {
+                                    collection1.findOne({'$and': [{'ownerid': claim['ownerid']}, {'proof': claim['proof']}]}, function (err, item) {
+                                        if (item) {
+                                            var message = item['state'] == 'confirmed'
+                                                ? 'Can`t create a new claim for already confirmed proof'
+                                                : 'There is already a claim request for this proof'
+                                            res.send(422, {
+                                                success: false,
+                                                message: message
+                                            })
                                         } else {
+                                            collection1.insert(claim, {
+                                                safe: true
+                                            }, function(err, result) {
+                                                if (err) {
+                                                    res.send(501, {
+                                                        success: false,
+                                                        message: config.get('Msg10')
+                                                    });
+                                                } else {
+                                                    if ('result' in result && 'ok' in result['result'] && result['result']['ok'] == 1) {
+                                                        create_votinground(result['ops'][0]['_id'].toString(),claim['ownerid']);
+                                                        var name = item['name'];
+                                                        var email = item['email'];
+                                                        var msg_text = "Dear " + name + ", <br><br> We have receive a github account verification request from you<br><br> For the purposes of verification, we request you to create under your github account " + info['proof'] + " a repository named \"indorse\" with a file named \"token\" at the \"master\" branch with the following text:<br><br>" + claim['githubtoken'] + "<br><br> Thank you and regards <br> Team Indorse <br><br> Please let us know if you have any problems or questions at: <br> www.indorse.io";
+                                                        var sub_text = 'Your email verified';
+                                                        var data = {
+                                                            from: 'Indorse <info@app.indorse.io>',
+                                                            to: email,
+                                                            subject: sub_text,
+                                                            html: msg_text
+                                                        };
+                                                        mailgun.messages().send(data, function (err) {
+                                                            if (err) {
+                                                                res.send(501, {
+                                                                    success: false,
+                                                                    message: 'Something went wrong'
+                                                                });
+                                                            }
+                                                            res.send(200, {
+                                                                success: true,
+                                                                claim: result['ops'],
+                                                                message: config.get('Msg34')
+                                                            });
+                                                        });
+                                                    } else {
+                                                        res.send(501, {
+                                                            success: false,
+                                                            message: config.get('Msg10')
+                                                        });
+                                                    }
+
+                                                }
+
+                                            })
+                                        }
+                                    })
+                                } else {
+                                    collection1.insert(claim, {
+                                        safe: true
+                                    }, function(err, result) {
+                                        if (err) {
                                             res.send(501, {
                                                 success: false,
                                                 message: config.get('Msg10')
                                             });
+                                        } else {
+                                            if ('result' in result && 'ok' in result['result'] && result['result']['ok'] == 1) {
+                                                create_votinground(result['ops'][0]['_id'].toString(),claim['ownerid']);
+                                                res.send(200, {
+                                                    success: true,
+                                                    claim: result['ops'],
+                                                    message: config.get('Msg34')
+                                                });
+                                            } else {
+                                                res.send(501, {
+                                                    success: false,
+                                                    message: config.get('Msg10')
+                                                });
+                                            }
+
                                         }
 
-                                    }
-
-                                })
+                                    })
+                                }
                             })
 
                         }
