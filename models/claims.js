@@ -11,6 +11,7 @@ var db = new Db(config.get('DBName'), server);
 var passwordHash = require('password-hash');
 var randtoken = require('rand-token');
 var crypto = require('crypto');
+var https = require('https');
 var mailgun_params = config.get('mailgun_params');
 var mailgun = require('mailgun-js')(mailgun_params);
 
@@ -393,6 +394,118 @@ exports.updateClaims = function(req, res) {
                 message: config.get('Msg42')
             });
         }
+    } else {
+        res.send(401, {
+            success: false,
+            message: config.get('Msg28')
+        });
+    }
+}
+
+exports.confirmGithubClaims = function(req, res) {
+
+    if ('login' in req.body && req.body.login) {
+        var info = req.body;
+
+        db.collection('users', function(err, collection) {
+            collection.findOne({
+                'email': info['email']
+            }, function(err, item) {
+                // no need to test if item exists
+                // If there would be no user than auth middleware would produce req.body.login == false
+                db.collection('claims', function(err, collection1) {
+                    collection1.find({
+                        '$and': [
+                            {
+                                'ownerid': item['_id'].toString()
+                            }, {
+                                'state': 'new'
+                            }, {
+                                'githubtoken': {$exists: true}
+                            }
+                        ]
+                    }).toArray(function(err, claims) {
+                        var confirmed = [];
+                        var failedToConfirm = [];
+                        var toLoadCounter = claims.length;
+
+                        claims.forEach(claim => {
+                            var githubAccName = claim['proof'];
+                            var tokenUrl = [
+                                'https://raw.githubusercontent.com',
+                                githubAccName,
+                                'indorse/master/token'
+                            ].join('/');
+
+                            https.get(tokenUrl, githubRes => {
+                                var body = '';
+                                if(githubRes.statusCode == 200) {
+
+                                    githubRes.on('data', part => {
+                                        body += part;
+                                    });
+
+                                    githubRes.on('end', () => {
+                                        if (body == claim['githubtoken']) {
+                                            confirmed.push({
+                                                'id': claim['_id'].toString(),
+                                                'proof': claim['proof']
+                                            });
+                                        } else {
+                                            failedToConfirm.push({
+                                                'id': claim['_id'].toString(),
+                                                'proof': claim['proof']
+                                            });
+                                        }
+
+                                        toLoadCounter--;
+                                        if (toLoadCounter == 0) {
+                                            var confirmedIds = confirmed.map(v => new ObjectID(v.id));
+                                            if (confirmedIds.length) {
+                                                collection1.update(
+                                                    {'_id': {'$in': confirmedIds}},
+                                                    {'$set': {'state': 'confirmed'}},
+                                                    {'multi': true},
+                                                    err => {
+                                                        if (err) {
+                                                            res.send(500, {
+                                                                success: false,
+                                                                message: 'Server internal error',
+                                                            });
+                                                        } else {
+                                                            res.send(200, {
+                                                                success: true,
+                                                                message: 'Some claims where successfully confirmed',
+                                                                confirmed: confirmed,
+                                                                failedToConfirm: failedToConfirm
+                                                            });
+                                                        }
+                                                    }
+                                                )
+                                            } else {
+                                                res.send(200, {
+                                                    success: true,
+                                                    message: 'No claims are ready to be confirmed',
+                                                    failedToConfirm: failedToConfirm
+                                                });
+                                            }
+                                        }
+                                    })
+                                } else {
+                                    res.send({
+                                        success: false,
+                                        message: config.get('Msg39')
+                                    });
+                                }
+                            })
+                        })
+
+                    })
+                });
+
+            });
+        });
+
     } else {
         res.send(401, {
             success: false,

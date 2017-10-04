@@ -6,6 +6,7 @@ let mongo = require('mongodb')
   , server = require('../server')
   , should = chai.should()
   , Sinon = require('sinon')
+  , https = require('https')
   , DB = require('./db')
   , Mailgun = require('mailgun-js')
   , crypto = require('crypto')
@@ -389,6 +390,42 @@ describe('Claims', () => {
         .end((err, res) => {
           res.body.should.be.a('object')
           res.should.have.status(404)
+          done()
+        })
+    })
+  })
+
+  describe('POST /confirmGithubClaims', () => {
+    it('should confirm prepared claims and not confirm not prepared', done => {
+      sandbox.stub(https, 'get')
+        .onCall(0).callsArgWith(1, {on: (event, cb) => {
+          cb(githubtoken)
+        }})
+        .onCall(1).callsArgWith(1, {on: (event, cb) => {
+        cb('')
+      }})
+
+      chai.request(server)
+        .post('/confirmGithubClaims')
+        .set('Authorization', 'Bearer ' + token)
+        .end((err, res) => {
+          res.should.have.status(200)
+          res.should.have.message('Some claims where successfully confirmed')
+          res.body.confirmed.length.should.be.equal(1)
+          res.body.failedToConfirm.length.should.be.equal(1)
+          done()
+        })
+    })
+
+    it('should not confirm any claims if non are prepared', done => {
+      chai.request(server)
+        .post('/confirmGithubClaims')
+        .set('Authorization', 'Bearer ' + token)
+        .end((err, res) => {
+          res.should.have.status(200)
+          res.should.have.message('No claims are ready to be confirmed')
+          res.body.should.not.have.property('confirmed')
+          res.body.failedToConfirm.length.should.be.equal(1)
           done()
         })
     })
